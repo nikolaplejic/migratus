@@ -6,14 +6,14 @@
             [migratus.database :as db]
             [migratus.migration.sql :refer :all]
             migratus.mock
-            [migratus.protocols :as proto]))
+            [migratus.protocols :as proto]
+            [next.jdbc :as jdbc]))
 
 (def db-store (str (.getName (io/file ".")) "/site.db"))
 
 (def test-config {:migration-dir        "migrations/"
-                  :db                   {:classname   "org.h2.Driver"
-                                         :subprotocol "h2"
-                                         :subname     db-store}})
+                  :db                   {:dbtype      "h2"
+                                         :dbname      db-store}})
 
 (defn reset-db []
   (letfn [(delete [f]
@@ -30,8 +30,8 @@
 (use-fixtures :each setup-test-db)
 
 (defn verify-table-exists? [config table-name]
-  (sql/with-db-connection [db (:db config)]
-    (db/table-exists? db table-name)))
+  (with-open [con (jdbc/get-connection (:db config))]
+    (db/table-exists? {:connection con} table-name)))
 
 (deftest test-run-sql-migrations
   (let [config (merge test-config

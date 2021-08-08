@@ -14,6 +14,7 @@
 (ns migratus.test.database
   (:require [clojure.java.io :as io]
             [clojure.java.jdbc :as sql]
+            [next.jdbc :as jdbc]
             [migratus.protocols :as proto]
             [migratus.core :as core]
             [clojure.test :refer :all]
