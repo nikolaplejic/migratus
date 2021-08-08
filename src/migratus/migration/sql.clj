@@ -3,7 +3,8 @@
     [clojure.java.jdbc :as sql]
     [clojure.string :as str]
     [clojure.tools.logging :as log]
-    [migratus.protocols :as proto])
+    [migratus.protocols :as proto]
+    [next.jdbc :as jdbc])
   (:import
     java.sql.SQLException
     java.util.regex.Pattern))
@@ -60,7 +61,7 @@
   (log/trace "executing" commands)
   (cond->
     (try
-      (sql/db-do-commands t-con tx? (parse-commands-sql config commands))
+      (jdbc/execute! t-con (parse-commands-sql config commands))
       (catch SQLException e
         (log/error (format "failed to execute command:\n %s" commands))
         (loop [e e]
@@ -83,12 +84,10 @@
   [{:keys [conn db modify-sql-fn expect-results?] :as config} sql direction]
   (when-let [commands (mapcat (wrap-modify-sql-fn modify-sql-fn) (split-commands sql expect-results?))]
     (if (use-tx? sql)
-      (sql/with-db-transaction
-        [t-con (or conn db)]
+      (jdbc/with-transaction
+        [t-con conn]
         (run-sql* config t-con true expect-results? commands direction))
-      (sql/with-db-connection
-        [t-con (or conn db)]
-        (run-sql* config t-con false expect-results? commands direction)))))
+      (run-sql* config conn false expect-results? commands direction))))
 
 (defrecord SqlMigration [id name up down]
   proto/Migration

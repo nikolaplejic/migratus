@@ -22,6 +22,7 @@
     [migratus.properties :as props]
     [migratus.utils :as utils]
     [next.jdbc :as jdbc]
+    [next.jdbc.optional :as opt]
     [next.jdbc.sql :as jdbc-sql])
   (:import
     java.io.File
@@ -39,24 +40,30 @@
 (defn mark-reserved [db table-name]
   (boolean
     (try
-      (sql/insert! db table-name {:id reserved-id})
+      (jdbc-sql/insert! db (keyword table-name) {:id reserved-id})
+      true
       (catch Exception _))))
 
 (defn mark-unreserved [db table-name]
-  (sql/delete! db table-name ["id=?" reserved-id]))
+  (jdbc-sql/delete! db (keyword table-name) ["id=?" reserved-id]))
 
 (defn complete? [db table-name id]
-  (first (sql/query db [(str "SELECT * from " table-name " WHERE id=?") id])))
+  (let [result (jdbc-sql/query
+                db
+                [(str "SELECT * from " table-name " WHERE id=?") id])]
+    (first result)))
 
 (defn mark-complete [db table-name description id]
   (log/debug "marking" id "complete")
-  (sql/insert! db table-name {:id          id
-                              :applied     (java.sql.Timestamp. (.getTime (java.util.Date.)))
-                              :description description}))
+  (jdbc-sql/insert! db
+                    (keyword table-name)
+                    {:id          id
+                     :applied     (java.sql.Timestamp. (.getTime (java.util.Date.)))
+                     :description description}))
 
 (defn mark-not-complete [db table-name id]
   (log/debug "marking" id "not complete")
-  (sql/delete! db table-name ["id=?" id]))
+  (jdbc-sql/delete! db (keyword table-name) ["id=?" id]))
 
 (defn migrate-up* [db {:keys [tx-handles-ddl?] :as config} {:keys [name] :as migration}]
   (let [id         (proto/id migration)
@@ -141,11 +148,14 @@
       (.close conn))))
 
 (defn completed-ids* [db table-name]
-  (sql/with-db-transaction
-    [t-con db]
-    (->> (sql/query t-con (str "select id from " table-name " where id != " reserved-id))
-         (map :id)
-         (doall))))
+  (jdbc/with-transaction
+    [tx db]
+    (->>
+     (jdbc-sql/query tx
+                     [(str "select id from " table-name " where id != " reserved-id)]
+                     {:builder-fn opt/as-unqualified-lower-maps})
+     (map :id)
+     (doall))))
 
 (defn table-exists?
   "Checks whether the migrations table exists, by attempting to select from
@@ -276,18 +286,20 @@
         (finally
           (disconnect* conn)))))
   (completed-ids [this]
-    (completed-ids* @connection (migration-table-name config)))
+    (completed-ids* (:connection @connection) (migration-table-name config)))
   (migrate-up [this migration]
     (if (proto/tx? migration :up)
       (let [conn (:connection @connection)]
         (jdbc/with-transaction
           [tx conn]
           (migrate-up* tx config migration)))
-      (migrate-up* (:connection @connection) config migration)))
+      (migrate-up* (:db config) config migration)))
   (migrate-down [this migration]
     (if (proto/tx? migration :down)
-      (sql/with-db-transaction [t-con @connection]
-        (migrate-down* t-con config migration))
+      (let [conn (:connection @connection)]
+        (jdbc/with-transaction
+          [tx conn]
+          (migrate-down* tx config migration)))
       (migrate-down* (:db config) config migration)))
   (connect [this]
     (reset! connection (connect* (:db config)))
